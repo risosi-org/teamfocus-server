@@ -1,0 +1,135 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+
+
+
+enum Role {
+  ADMIN
+  USER
+  MANAGER
+}
+
+enum Weekday {
+  SU
+  M
+  TU
+  W
+  TH
+  F
+  SA
+}
+
+model User {
+  id           String   @id @default(uuid())
+  fullname     String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  imageUrl     String?
+  teamId       String?
+  team         Team?   @relation("TeamMembers", fields: [teamId], references: [id])
+  managedTeams Team[] @relation("TeamManager")
+  sessions     Session[] @relation("UserSessions")
+  appSessions  AppSession[] // Relation link: One User -> Many AppSessions
+}
+
+model Upload {
+  id        String   @id @default(uuid())
+  url       String
+  filename  String
+  filepath  String
+  mimetype  String
+  size      Int
+  sessionId String
+  session   Session  @relation("SessionUploads", fields: [sessionId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Team {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  managerId String
+  manager   User     @relation("TeamManager", fields: [managerId], references: [id])
+  members   User[]   @relation("TeamMembers")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+model Log {
+  id        String   @id @default(uuid())
+  action    String
+  sessionId String
+  duration  Int      @default(0)
+  session   Session  @relation("SessionLogs", fields: [sessionId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+
+
+model Session {
+  id          String    @id @default(uuid())
+  duration    Int       @default(0) // Good practice to default to 0
+  userId      String
+  user        User      @relation("UserSessions", fields: [userId], references: [id])
+  
+  // Replaced Weekday with dateStamp for precise local-day tracking
+  dateStamp   String    // Format: "YYYY-MM-DD" (e.g., "2026-05-31")
+  
+  uploads     Upload[]  @relation("SessionUploads")
+  logs        Log[]     @relation("SessionLogs")
+  
+  createdAt   DateTime  @default(now()) // System UTC timestamp
+  updatedAt   DateTime  @updatedAt
+
+  // Guarantees the database won't allow two sessions for the same user on the same day
+  @@unique([userId, dateStamp])
+}
+
+
+
+
+
+enum Category {
+  Productivity
+  Entertainment
+  Utilities
+}
+
+model App {
+  id        String    @id // e.g., "app-visual-studio-code"
+  name      String    @unique // e.g., "Visual Studio Code"
+  category  Category  @default(Utilities)
+  createdAt DateTime  @default(now())
+  sessions  AppSession[] // Relation link: One App -> Many Sessions
+}
+
+model AppSession {
+  id         String   @id @default(uuid())
+  appId      String
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  app        App      @relation(fields: [appId], references: [id], onDelete: Cascade)
+  start      DateTime
+  end        DateTime
+  durationMs Int
+  localDate  String
+  @@index([userId ,start, end]) // Indexing timestamps makes our daily/hourly queries lightning fast
+}

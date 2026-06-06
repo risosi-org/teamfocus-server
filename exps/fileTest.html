@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <input type="file" name="file" id="fileInput">
+
+
+    <div id="results"></div>
+
+    <script>
+        fileInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('sessionId', '12345'); // 예시 세션 ID
+
+            try {
+                const response = await fetch('http://localhost:3000/api/v1/uploads?sessionId=dd5df9ba-4e64-4379-82e0-c87698424a3b', {
+                    headers: {
+                        "Authorization":`Bearer ${"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4ZGI1MzJhOC0zNmE4LTQ0MGEtOGVlNi1hZTFlNGUxY2NlMTIiLCJlbWFpbCI6ImppczkwMUBnbWFpbC5jb20iLCJyb2xlIjoiVVNFUiIsImlhdCI6MTc4MDIzNjUwMiwiZXhwIjoxNzgwMzIyOTAyfQ.Gn8YEejjUZq-1hae11rFkCqLC0ZgMmfchmNmw3DxP20"}`,
+                    },
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('File uploaded successfully:', result);
+                } else {
+                    console.error('File upload failed:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Error uploading file:', error);
+            }
+        });
+
+        const resultsDiv = document.getElementById('results');
+
+        fetch('http://localhost:3000/api/v1/uploads')
+            .then(response => response.json())
+            .then(data => {
+                data.data.forEach(file => {
+                    const fileElement = document.createElement('img');
+
+                    const url = encodeURIComponent(file.url);
+
+                    fileElement.src = `http://localhost:3000/${file.url}`;
+                    fileElement.alt = file.filename;
+                    resultsDiv.appendChild(fileElement);
+                });
+            })
+            .catch(error => console.error('Error fetching files:', error));
+
+
+    </script>
+</body>
+</html>
