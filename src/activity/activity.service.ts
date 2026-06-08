@@ -3,6 +3,7 @@ import { SessionItemDto } from './dto/app_session-dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { User } from '../generated/prisma/client';
 import { AccessControlService } from '../auth/access-control.service';
+import { entertainment, productivity } from './utils';
 
 
 @Injectable()
@@ -11,7 +12,6 @@ export class ActivityService {
   async processBatch(sessionDtos: SessionItemDto[], user: User): Promise<number> {
     if (sessionDtos.length === 0) return 0;
     const userId = user.id;
-    // 1. Map raw sessions to match database schema identifiers
 
     const userExists = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!userExists) throw new NotFoundException('User not found');
@@ -20,7 +20,16 @@ export class ActivityService {
     const incomingAppsMap = new Map<string, { id: string; name: string; category: any }>();
     const uniqueNamesFromPayload = new Set<string>();
 
-    const formattedSessions = sessionDtos.map((session) => {
+    // We aggregate sessions by app and the start hour in-memory first
+    const aggregatedSessionsMap = new Map<string, {
+      appId: string;
+      userId: string;
+      hourStart: Date;
+      durationMs: number;
+      localDate: string;
+    }>();
+
+    for (const session of sessionDtos) {
       const appId = `app-${session.appName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
       if (!incomingAppsMap.has(appId)) {
@@ -32,16 +41,25 @@ export class ActivityService {
         uniqueNamesFromPayload.add(session.appName);
       }
 
-      return {
-        appId: appId,
-        userId: userId,
-        start: new Date(session.start),
-        end: new Date(session.end),
-        durationMs: session.durationMs,
-        localDate: session.localDate,
-      };
-    });
+      // Determine the start of the hour in the server timezone
+      const startObj = new Date(session.start);
+      const hourStart = new Date(startObj);
+      hourStart.setMinutes(0, 0, 0);
 
+      const key = `${appId}_${hourStart.getTime()}`;
+      const existingAgg = aggregatedSessionsMap.get(key);
+      if (existingAgg) {
+        existingAgg.durationMs += session.durationMs;
+      } else {
+        aggregatedSessionsMap.set(key, {
+          appId,
+          userId,
+          hourStart,
+          durationMs: session.durationMs,
+          localDate: session.localDate,
+        });
+      }
+    }
 
     // 2. Query DB to check what Apps ALREADY exist by ID or Unique Name
     const existingAppsInDb = await this.prisma.app.findMany({
@@ -53,7 +71,7 @@ export class ActivityService {
       },
       select: { id: true, name: true }
     });
-    // Create handy Sets of strings for lightning-fast lookup comparisons
+    // Create handy Sets of strings for lookup comparisons
     const existingIds = new Set(existingAppsInDb.map(app => app.id));
     const existingNames = new Set(existingAppsInDb.map(app => app.name.toLowerCase()));
 
@@ -64,6 +82,8 @@ export class ActivityService {
       return !isIdDuplicate && !isNameDuplicate;
     });
 
+    const aggregatedSessions = Array.from(aggregatedSessionsMap.values());
+
     // 4. Safe Relational Transaction Execution
     await this.prisma.$transaction(async (tx) => {
       if (appsToInsert.length > 0) {
@@ -73,14 +93,65 @@ export class ActivityService {
         });
       }
 
+      // Query database for existing AppSessions matching the user, incoming appIds, and hourStart dates
+      const appIds = aggregatedSessions.map(s => s.appId);
+      const startHours = aggregatedSessions.map(s => s.hourStart);
 
-      // Bulk insert all tracking timelines in one query execution
-      await tx.appSession.createMany({
-        data: formattedSessions,
+      const existingSessions = await tx.appSession.findMany({
+        where: {
+          userId,
+          appId: { in: appIds },
+          start: { in: startHours },
+        },
       });
+
+      // Group existing sessions by appId and start timestamp for quick lookup
+      const existingSessionsMap = new Map<string, typeof existingSessions[0]>();
+      for (const sess of existingSessions) {
+        const key = `${sess.appId}_${sess.start.getTime()}`;
+        existingSessionsMap.set(key, sess);
+      }
+
+      const sessionsToCreate: any[] = [];
+
+      for (const agg of aggregatedSessions) {
+        const key = `${agg.appId}_${agg.hourStart.getTime()}`;
+        const existingSess = existingSessionsMap.get(key);
+
+        if (existingSess) {
+          // Update existing session: accumulate duration and recalculate end
+          const newDurationMs = existingSess.durationMs + agg.durationMs;
+          const newEnd = new Date(existingSess.start.getTime() + newDurationMs);
+
+          await tx.appSession.update({
+            where: { id: existingSess.id },
+            data: {
+              durationMs: newDurationMs,
+              end: newEnd,
+            },
+          });
+        } else {
+          // Create new session
+          const end = new Date(agg.hourStart.getTime() + agg.durationMs);
+          sessionsToCreate.push({
+            appId: agg.appId,
+            userId: agg.userId,
+            start: agg.hourStart,
+            end: end,
+            durationMs: agg.durationMs,
+            localDate: agg.localDate,
+          });
+        }
+      }
+
+      if (sessionsToCreate.length > 0) {
+        await tx.appSession.createMany({
+          data: sessionsToCreate,
+        });
+      }
     });
 
-    return formattedSessions.length;
+    return sessionDtos.length;
   }
 
   private inferCategory(
@@ -88,97 +159,7 @@ export class ActivityService {
   ): 'Productivity' | 'Entertainment' | 'Utilities' {
     const norm = name.toLowerCase();
 
-    const productivity = [
-      // Editors & IDEs
-      'code',
-      'vscode',
-      'visual studio',
-      'cursor',
-      'webstorm',
-      'intellij',
-      'pycharm',
-      'goland',
-      'clion',
-      'sublime',
-      'atom',
-      'notepad++',
-
-      // Development
-      'terminal',
-      'iterm',
-      'warp',
-      'xcode',
-      'docker',
-      'postman',
-      'insomnia',
-      'github desktop',
-
-      // Browsers
-      'chrome',
-      'edge',
-      'firefox',
-      'brave',
-      'arc',
-      'opera',
-
-      // Communication
-      'slack',
-      'discord',
-      'teams',
-      'zoom',
-      'meet',
-      'skype',
-
-      // Office
-      'word',
-      'excel',
-      'powerpoint',
-      'outlook',
-      'notion',
-      'obsidian',
-      'evernote',
-      'onenote',
-      'figma',
-      'canva',
-      'trello',
-      'jira',
-      'asana',
-      'clickup',
-      'linear'
-    ];
-
-    const entertainment = [
-      // Music
-      'spotify',
-      'apple music',
-      'music',
-      'tidal',
-
-      // Video
-      'vlc',
-      'netflix',
-      'youtube',
-      'prime video',
-      'disney',
-      'plex',
-      'jellyfin',
-      'kodi',
-
-      // Gaming
-      'steam',
-      'epic games',
-      'battle.net',
-      'riot',
-      'league of legends',
-      'valorant',
-      'minecraft',
-      'roblox',
-      'gog galaxy',
-
-      // Streaming
-      'obs',
-      'twitch'
-    ];
+    
 
     if (productivity.some(k => norm.includes(k))) {
       return 'Productivity';

@@ -55,13 +55,13 @@ export class TeamController {
 
   @Auth()
   @Get('join/:tid')
-  join(@Param('tid') id: string, @CRUser() user: User) {
-    return this.teamService.join(id, user);
+  join(@Param('tid') id: string, @Query("userId") userId: string , @CRUser() user: User) {
+    return this.teamService.join(id, user, userId);
   }
 
   @Auth()
   @Get('exit/:tid')
-  exit(@Param('tid') id: string, @CRUser() user: User) {
-    return this.teamService.exit(id, user);
+  exit(@Param('tid') id: string, @Query("userId") userId: string , @CRUser() user: User) {
+    return this.teamService.exit(id, user, userId);
   }
 }

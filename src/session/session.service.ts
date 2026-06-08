@@ -1,20 +1,20 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionDto } from './dto/update-session.dto';
-import { Prisma, User } from '../generated/prisma/client'; // Adjust the import path as necessary
+import { Prisma, User, Session } from '../generated/prisma/client'; // Adjust the import path as necessary
 import { PrismaService } from '../prisma/prisma.service';
 import { QuerySessionDto } from './dto/query-session.dto';
 import { AccessControlService } from '../auth/access-control.service';
-
+import fs from 'fs/promises';
 
 @Injectable()
 export class SessionService {
   constructor(private prisma: PrismaService, private accessControl: AccessControlService) { }
 
 
-  
+
   async create(createSessionDto: CreateSessionDto, user: User) {
-   
+
     // check session exists for the user on the same weekday
     const session = await this.prisma.session.upsert({
       where: {
@@ -43,7 +43,7 @@ export class SessionService {
       sortOrder = 'desc',
     } = query;
 
-    const userId = uId ? await this.accessControl.validateUserAccess(user, uId): (user.role==="ADMIN"? undefined : user.id);
+    const userId = uId ? await this.accessControl.validateUserAccess(user, uId) : (user.role === "ADMIN" ? undefined : user.id);
 
     const skip = (page - 1) * limit;
     const take = limit;
@@ -99,9 +99,29 @@ export class SessionService {
     });
   }
 
-  
+
   async remove(id: string, user: User) {
-    await this.accessControl.validateSessionAccess(user, id)
+    
+    const session = await this.accessControl.validateSessionAccess(user, id, {
+      uploads: true,
+    }) as Session & { uploads?: Array<{ filepath: string }> };
+    if (session.uploads && session.uploads.length > 0) {
+      await Promise.all(
+        session.uploads.map(async (upload) => {
+          try {
+            const fileExists = await fs.access(upload.filepath)
+              .then(() => true)
+              .catch(() => false);
+
+            if (fileExists) {
+              await fs.unlink(upload.filepath);
+            }
+          } catch (error) {
+            console.error(`Failed to delete physical file: ${upload.filepath}`, error);
+          }
+        })
+      );
+    }
     return await this.prisma.session.delete({
       where: { id },
     });

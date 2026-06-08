@@ -209,7 +209,10 @@ export class TeamService {
     });
   }
 
-  async join(teamId: string, actor: User) {
+  async join(teamId: string, actor: User, who: string) {
+
+    this.accessControl.validateUserAccess(actor, who);
+
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
     });
@@ -219,7 +222,7 @@ export class TeamService {
 
     // Update the actor user's teamId
     await this.prisma.user.update({
-      where: { id: actor.id },
+      where: { id: who },
       data: { teamId },
     });
 
@@ -229,7 +232,10 @@ export class TeamService {
     };
   }
 
-  async exit(teamId: string, actor: User) {
+  async exit(teamId: string, actor: User, who: string) {
+    
+    this.accessControl.validateUserAccess(actor, who);
+
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
     });
@@ -239,7 +245,7 @@ export class TeamService {
 
     // Check if user is in this team
     const currentUser = await this.prisma.user.findUnique({
-      where: { id: actor.id },
+      where: { id: who },
       select: { teamId: true },
     });
 

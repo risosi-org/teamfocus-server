@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import * as bcrypt from 'bcrypt';
+import fs from "fs/promises";
 
 import { Prisma, User } from '../generated/prisma/client'; // Adjust the import path as necessary
 import { QueryUserDto } from './dto/query-user.dto';
@@ -149,13 +150,49 @@ export class UserService {
     });
   }
 
-  async remove(id: string, actor: User) {
-    await this.accessControl.validateUserAccess(actor, id)
-    return this.prisma.user.delete({
-      where: { id },
-      omit: {
-        passwordHash: true, // Exclude passwordHash from the result
-      }
-    });
+
+async remove(id: string, actor: User) {
+  await this.accessControl.validateUserAccess(actor, id);
+
+  // 1. Check if the user is currently managing any teams
+  const managedTeamsCount = await this.prisma.team.count({
+    where: { managerId: id },
+  });
+  if (managedTeamsCount > 0) {
+    throw new BadRequestException(
+      'Cannot delete user who is currently managing a team. Please reassign or delete managed teams first.'
+    );
   }
+  const userUploads = await this.prisma.upload.findMany({
+    where: {
+      session: { userId: id },
+    },
+    select: { filepath: true },
+  });
+
+  if (userUploads.length > 0) {
+    await Promise.all(
+      userUploads.map(async (upload) => {
+        try {
+          const fileExists = await fs.access(upload.filepath)
+            .then(() => true)
+            .catch(() => false);
+          
+          if (fileExists) {
+            await fs.unlink(upload.filepath);
+          }
+        } catch (error) {
+          console.error(`Failed to delete user physical file: ${upload.filepath}`, error);
+        }
+      })
+    );
+  }
+
+  return await this.prisma.user.delete({
+    where: { id },
+    omit: {
+      passwordHash: true,
+    },
+  });
+}
 }
