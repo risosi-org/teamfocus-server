@@ -159,7 +159,7 @@ export class ActivityService {
   ): 'Productivity' | 'Entertainment' | 'Utilities' {
     const norm = name.toLowerCase();
 
-    
+
 
     if (productivity.some(k => norm.includes(k))) {
       return 'Productivity';
@@ -383,5 +383,100 @@ export class ActivityService {
         hourly: totalMinutes > 0 ? roundedHourly : [], // Return empty array if no minutes are logged
       };
     });
+  }
+
+
+
+
+  async getTeamPast7DaysAnalytics(teamId: string, todayStr: string, actor: User) {
+    await this.accessControl.validateTeamAccess(actor, teamId);
+    const weekdayNames = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const targetDates: string[] = [];
+
+    // 1. Generate the last 7 local dates relative to the user's "today"
+    const [year, month, day] = todayStr.split('-').map(Number);
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(year, month - 1, day);
+      d.setDate(d.getDate() - i);
+      targetDates.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+
+    // 2. Fetch the team members and their sessions in a single relational query
+    const team = await this.prisma.team.findUnique({
+      where: { id: teamId },
+      select: {
+        members: {
+          select: {
+            id: true,
+            name: true, // Optional: useful for the individual breakdown labels
+            sessions: {
+              where: {
+                dateStamp: { in: targetDates }
+              },
+              select: {
+                dateStamp: true,
+                duration: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!team) throw new Error("Team not found");
+
+    // 3. Initialize lookup structures
+    const teamAggregationMap = new Map<string, number>(); // dateStamp -> totalDuration
+    const memberMaps = new Map<string, Map<string, number>>(); // userId -> (dateStamp -> duration)
+
+    // 4. Populate maps with DB data
+    team.members.forEach(member => {
+      const memberSessionMap = new Map<string, number>();
+
+      member.sessions.forEach(s => {
+        // For the individual member tracking
+        memberSessionMap.set(s.dateStamp, s.duration);
+
+        // For the collective team tracking
+        const currentTeamTotal = teamAggregationMap.get(s.dateStamp) || 0;
+        teamAggregationMap.set(s.dateStamp, currentTeamTotal + s.duration);
+      });
+
+      memberMaps.set(member.id, memberSessionMap);
+    });
+
+    // 5. Build the strict 7-length array for the collective team data
+    const teamAggregatedData = targetDates.map(dateStr => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return {
+        day: weekdayNames[new Date(y, m - 1, d).getDay()],
+        duration: teamAggregationMap.get(dateStr) || 0
+      };
+    });
+
+    // 6. Build the strict 7-length arrays for each individual member
+    const individualMemberData = team.members.map(member => {
+      const userSessions = memberMaps.get(member.id);
+
+      const timeline = targetDates.map(dateStr => {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return {
+          day: weekdayNames[new Date(y, m - 1, d).getDay()],
+          duration: userSessions?.get(dateStr) || 0
+        };
+      });
+
+      return {
+        userId: member.id,
+        userName: member.name,
+        data: timeline
+      };
+    });
+
+    // Return both shapes together
+    return {
+      teamTotal: teamAggregatedData, // Exactly 7 items (Summed durations)
+      membersBreakdown: individualMemberData // Array of members, each with exactly 7 items
+    };
   }
 }
