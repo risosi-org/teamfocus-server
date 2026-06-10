@@ -68,8 +68,11 @@ export class TeamService {
       sortOrder = 'desc',
     } = query;
 
-    const skip = (page - 1) * limit;
-    const take = limit;
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+
+    const skip = (pageNum - 1) * limitNum;
+    const take = limitNum;
 
     const filters: Prisma.TeamWhereInput = {
       ...(name && { name: { contains: name } }),
@@ -122,9 +125,9 @@ export class TeamService {
       data: teams,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
       },
     };
   }

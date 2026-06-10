@@ -45,8 +45,11 @@ export class SessionService {
 
     const userId = uId ? await this.accessControl.validateUserAccess(user, uId) : (user.role === "ADMIN" ? undefined : user.id);
 
-    const skip = (page - 1) * limit;
-    const take = limit;
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+
+    const skip = (pageNum - 1) * limitNum;
+    const take = limitNum;
 
     const where: Prisma.SessionWhereInput = {
       ...(userId && { userId }),
@@ -77,9 +80,9 @@ export class SessionService {
       data: sessions,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
       },
     }
   }

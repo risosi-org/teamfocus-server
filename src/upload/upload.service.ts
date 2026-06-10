@@ -78,8 +78,11 @@ export class UploadService {
 
     if (!sessionId && user.role!=="ADMIN") throw new ForbiddenException("invalid access");
 
-    const skip = (page - 1) * limit;
-    const take = limit;
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 10;
+
+    const skip = (pageNum - 1) * limitNum;
+    const take = limitNum;
 
     const where: Prisma.UploadWhereInput = {
       ...(sessionId && {sessionId}),
@@ -109,9 +112,9 @@ export class UploadService {
       data: uploads,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
       },
     };
 
@@ -130,10 +133,10 @@ export class UploadService {
     await this.accessControl.validateUploadAccess(user, id);
     try {
       const uploaded = await this.prisma.upload.delete({ where: { id } });
-      await this.deleteFile(uploaded.filepath);
+      await (this.deleteFile(uploaded.filepath).then(e=>0).catch(e=>0));
       return uploaded;
     } catch (error) {
-      throw new Error((error as Error).message || 'Failed to delete file');
+      throw new NotFoundException((error as Error).message || 'Failed to delete file');
     }
   }
 
