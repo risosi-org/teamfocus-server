@@ -9,7 +9,7 @@ import { entertainment, productivity } from './utils';
 @Injectable()
 export class ActivityService {
   constructor(private prisma: PrismaService, private accessControl: AccessControlService) { }
-  async processBatch(sessionDtos: SessionItemDto[], user: User): Promise<number> {
+  async processBatchv1(sessionDtos: SessionItemDto[], user: User): Promise<number> {
     if (sessionDtos.length === 0) return 0;
     const userId = user.id;
 
@@ -153,7 +153,145 @@ export class ActivityService {
 
     return sessionDtos.length;
   }
+  async processBatch(sessionDtos: any[], user: any): Promise<number> {
+  if (sessionDtos.length === 0) return 0;
+  const userId = user.id;
 
+  const userExists = await this.prisma.user.findUnique({ where: { id: userId } });
+  if (!userExists) throw new NotFoundException('User not found');
+
+  const incomingAppsMap = new Map<string, { id: string; name: string; category: any }>();
+  const uniqueNamesFromPayload = new Set<string>();
+
+  const aggregatedSessionsMap = new Map<string, {
+    appId: string;
+    userId: string;
+    hourStart: Date;
+    durationMs: number;
+    localDate: string;
+  }>();
+
+  for (const session of sessionDtos) {
+    const appId = `app-${session.appName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+
+    if (!incomingAppsMap.has(appId)) {
+      incomingAppsMap.set(appId, {
+        id: appId,
+        name: session.appName,
+        category: this.inferCategory(session.appName),
+      });
+      uniqueNamesFromPayload.add(session.appName);
+    }
+
+    // 🧠 TIMEZONE INSULATION FIX:
+    // We isolate the exact absolute timestamp received from the client.
+    const hourStart = new Date(session.start);
+
+    // Build a unique tracking string key matching the specific app, local date, and exact hour block
+    // E.g., "app-chrome_2026-06-13_21"
+    const hourMatch = session.start.match(/T(\d{2}):/);
+    const localHourStr = hourMatch ? hourMatch[1] : '00';
+    
+    const key = `${appId}_${session.localDate}_H${localHourStr}`;
+    
+    const existingAgg = aggregatedSessionsMap.get(key);
+    if (existingAgg) {
+      existingAgg.durationMs += session.durationMs;
+    } else {
+      aggregatedSessionsMap.set(key, {
+        appId,
+        userId,
+        hourStart,
+        durationMs: session.durationMs,
+        localDate: session.localDate,
+      });
+    }
+  }
+
+  const existingAppsInDb = await this.prisma.app.findMany({
+    where: {
+      OR: [
+        { id: { in: Array.from(incomingAppsMap.keys()) } },
+        { name: { in: Array.from(uniqueNamesFromPayload) } }
+      ]
+    },
+    select: { id: true, name: true }
+  });
+  
+  const existingIds = new Set(existingAppsInDb.map(app => app.id));
+  const existingNames = new Set(existingAppsInDb.map(app => app.name.toLowerCase()));
+
+  const appsToInsert = Array.from(incomingAppsMap.values()).filter(app => {
+    const isIdDuplicate = existingIds.has(app.id);
+    const isNameDuplicate = existingNames.has(app.name.toLowerCase());
+    return !isIdDuplicate && !isNameDuplicate;
+  });
+
+  const aggregatedSessions = Array.from(aggregatedSessionsMap.values());
+
+  await this.prisma.$transaction(async (tx) => {
+    if (appsToInsert.length > 0) {
+      await tx.app.createMany({
+        data: appsToInsert,
+      });
+    }
+
+    const appIds = aggregatedSessions.map(s => s.appId);
+    const startHours = aggregatedSessions.map(s => s.hourStart);
+
+    const existingSessions = await tx.appSession.findMany({
+      where: {
+        userId,
+        appId: { in: appIds },
+        start: { in: startHours },
+      },
+    });
+
+    const existingSessionsMap = new Map<string, typeof existingSessions[0]>();
+    for (const sess of existingSessions) {
+      const key = `${sess.appId}_${sess.start.getTime()}`;
+      existingSessionsMap.set(key, sess);
+    }
+
+    const sessionsToCreate: any[] = [];
+
+    for (const agg of aggregatedSessions) {
+      const key = `${agg.appId}_${agg.hourStart.getTime()}`;
+      const existingSess = existingSessionsMap.get(key);
+
+      if (existingSess) {
+        const newDurationMs = existingSess.durationMs + agg.durationMs;
+        const newEnd = new Date(existingSess.start.getTime() + newDurationMs);
+
+        await tx.appSession.update({
+          where: { id: existingSess.id },
+          data: {
+            durationMs: newDurationMs,
+            end: newEnd,
+          },
+        });
+      } else {
+        const end = new Date(agg.hourStart.getTime() + agg.durationMs);
+        sessionsToCreate.push({
+          appId: agg.appId,
+          userId: agg.userId,
+          start: agg.hourStart,
+          end: end,
+          durationMs: agg.durationMs,
+          localDate: agg.localDate,
+        });
+      }
+    }
+
+    if (sessionsToCreate.length > 0) {
+      await tx.appSession.createMany({
+        data: sessionsToCreate,
+      });
+    }
+  });
+
+  return sessionDtos.length;
+}
   private inferCategory(
     name: string
   ): 'Productivity' | 'Entertainment' | 'Utilities' {
