@@ -408,7 +408,7 @@ export class ActivityService {
         members: {
           select: {
             id: true,
-            name: true, // Optional: useful for the individual breakdown labels
+            fullname: true, // Optional: useful for the individual breakdown labels
             sessions: {
               where: {
                 dateStamp: { in: targetDates }
@@ -468,7 +468,7 @@ export class ActivityService {
 
       return {
         userId: member.id,
-        userName: member.name,
+        userName: member.fullname,
         data: timeline
       };
     });

@@ -258,8 +258,18 @@ export class TeamService {
 
     // Set user's teamId to null
     await this.prisma.user.update({
-      where: { id: actor.id },
+      where: { id: who },
       data: { teamId: null },
+    });
+
+    // Remove the member relation from the team
+    await this.prisma.team.update({
+      where: { id: teamId },
+      data: {
+        members: {
+          disconnect: { id: who },
+        },
+      },
     });
 
     return {

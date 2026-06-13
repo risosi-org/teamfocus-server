@@ -96,6 +96,14 @@ export class UserService {
       },
       omit: {
         passwordHash: true, // Exclude passwordHash from the result
+      },
+      include: {
+        team:{
+          omit:{
+            createdAt: true,
+            updatedAt: true,
+          }
+        }
       }
     });
 

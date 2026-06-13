@@ -114,6 +114,23 @@ Manages teams, managers, and team membership.
     "managerId": "m-1234-5678"
   }
   ```
+* **Response:** Newly created team object with manager details
+  ```json
+  {
+    "id": "team-uuid-1234",
+    "name": "Team Alpha",
+    "managerId": "manager-uuid-5678",
+    "createdAt": "2026-06-11T10:00:00Z",
+    "updatedAt": "2026-06-11T10:00:00Z",
+    "manager": {
+      "id": "manager-uuid-5678",
+      "fullname": "John Manager",
+      "email": "john.manager@example.com",
+      "role": "MANAGER",
+      "imageUrl": "https://example.com/image.png"
+    }
+  }
+  ```
 * **Description:** Create a new team.
 
 ### 2. Query Teams
@@ -127,11 +144,74 @@ Manages teams, managers, and team membership.
   * `managerId` (String)
   * `sortBy` (String)
   * `sortOrder` (String: `asc` | `desc`)
+* **Response:** Paginated team list with metadata
+  ```json
+  {
+    "data": [
+      {
+        "id": "team-uuid-1234",
+        "name": "Team Alpha",
+        "managerId": "manager-uuid-5678",
+        "createdAt": "2026-06-02T10:00:00Z",
+        "updatedAt": "2026-06-11T15:30:00Z",
+        "manager": {
+          "id": "manager-uuid-5678",
+          "fullname": "John Manager",
+          "email": "john.manager@example.com",
+          "role": "MANAGER",
+          "imageUrl": "https://example.com/image.png"
+        },
+        "_count": {
+          "members": 5
+        }
+      }
+    ],
+    "meta": {
+      "total": 1,
+      "page": 1,
+      "limit": 10,
+      "totalPages": 1
+    }
+  }
+  ```
 * **Description:** Retrieve a paginated list of teams.
 
 ### 3. Get Team Details
 * **Endpoint:** `GET /teams/:tid`
 * **Access:** Protected (`ADMIN`, `MANAGER`)
+* **Response:** Team object with manager and all members
+  ```json
+  {
+    "id": "team-uuid-1234",
+    "name": "Team Alpha",
+    "managerId": "manager-uuid-5678",
+    "createdAt": "2026-06-02T10:00:00Z",
+    "updatedAt": "2026-06-11T15:30:00Z",
+    "manager": {
+      "id": "manager-uuid-5678",
+      "fullname": "John Manager",
+      "email": "john.manager@example.com",
+      "role": "MANAGER",
+      "imageUrl": "https://example.com/image.png"
+    },
+    "members": [
+      {
+        "id": "user-uuid-1001",
+        "fullname": "Jane Doe",
+        "email": "jane.doe@example.com",
+        "role": "USER",
+        "imageUrl": "https://example.com/jane.png"
+      },
+      {
+        "id": "user-uuid-1002",
+        "fullname": "Bob Smith",
+        "email": "bob.smith@example.com",
+        "role": "USER",
+        "imageUrl": "https://example.com/bob.png"
+      }
+    ]
+  }
+  ```
 * **Description:** Retrieve details for a specific team.
 
 ### 4. Update Team
@@ -144,11 +224,38 @@ Manages teams, managers, and team membership.
     "managerId": "new-manager-uuid"
   }
   ```
+* **Response:** Updated team object with manager details
+  ```json
+  {
+    "id": "team-uuid-1234",
+    "name": "Updated Team Name",
+    "managerId": "manager-uuid-5678",
+    "createdAt": "2026-06-02T10:00:00Z",
+    "updatedAt": "2026-06-11T15:30:00Z",
+    "manager": {
+      "id": "manager-uuid-5678",
+      "fullname": "John Manager",
+      "email": "john.manager@example.com",
+      "role": "MANAGER",
+      "imageUrl": "https://example.com/image.png"
+    }
+  }
+  ```
 * **Description:** Update team metadata.
 
 ### 5. Delete Team
 * **Endpoint:** `DELETE /teams/:tid`
 * **Access:** Protected (`ADMIN`, `MANAGER`)
+* **Response:** Deleted team object
+  ```json
+  {
+    "id": "team-uuid-1234",
+    "name": "Team Alpha",
+    "managerId": "manager-uuid-5678",
+    "createdAt": "2026-06-02T10:00:00Z",
+    "updatedAt": "2026-06-11T15:30:00Z"
+  }
+  ```
 * **Description:** Delete a team.
 
 ### 6. Join Team
@@ -156,6 +263,13 @@ Manages teams, managers, and team membership.
 * **Access:** Protected (all authenticated users)
 * **Query Parameters (optional):**
   * `userId` (String): optional override for the target user.
+* **Response:** Success message with team ID
+  ```json
+  {
+    "message": "Successfully joined the team",
+    "teamId": "team-uuid-1234"
+  }
+  ```
 * **Description:** Join the specified team.
 
 ### 7. Exit Team
@@ -163,6 +277,12 @@ Manages teams, managers, and team membership.
 * **Access:** Protected (all authenticated users)
 * **Query Parameters (optional):**
   * `userId` (String): optional override for the target user.
+* **Response:** Success message
+  ```json
+  {
+    "message": "Successfully exited the team"
+  }
+  ```
 * **Description:** Leave the specified team.
 
 ---
